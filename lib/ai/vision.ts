@@ -24,6 +24,56 @@ export function sortHazards(hazards: Hazard[]): Hazard[] {
   );
 }
 
+/**
+ * Provider config — any OpenAI-compatible chat-completions endpoint works:
+ *   OpenAI:  OPENAI_API_KEY=sk-...                          (default base URL, model gpt-4o)
+ *   Ollama:  OPENAI_BASE_URL=http://localhost:11434/v1  VISION_MODEL=qwen2.5vl:3b  (no key needed)
+ */
+const DEFAULT_BASE_URL = "https://api.openai.com/v1";
+
+function providerConfig() {
+  const baseUrl = (process.env.OPENAI_BASE_URL ?? DEFAULT_BASE_URL).replace(
+    /\/+$/,
+    "",
+  );
+  const apiKey = process.env.OPENAI_API_KEY;
+  const isCustom = baseUrl !== DEFAULT_BASE_URL;
+  return {
+    baseUrl,
+    apiKey,
+    model: process.env.VISION_MODEL ?? "gpt-4o",
+    // A custom endpoint (e.g. local Ollama) doesn't need an API key.
+    configured: Boolean(apiKey) || isCustom,
+    // Local models are slower than hosted APIs — give them room.
+    timeoutMs: isCustom ? 120000 : 15000,
+    source: isCustom ? `local-${process.env.VISION_MODEL ?? "unknown"}` : "openai-gpt4o",
+  };
+}
+
+async function chatCompletion(
+  body: Record<string, unknown>,
+): Promise<string> {
+  const { baseUrl, apiKey, timeoutMs } = providerConfig();
+  const res = await fetch(`${baseUrl}/chat/completions`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {}),
+    },
+    body: JSON.stringify(body),
+    signal: AbortSignal.timeout(timeoutMs),
+  });
+
+  if (!res.ok) {
+    throw new Error(`Vision API error: ${res.status}`);
+  }
+
+  const json = await res.json();
+  const content = json.choices?.[0]?.message?.content;
+  if (!content) throw new Error("Empty vision API response");
+  return content;
+}
+
 const SYSTEM_PROMPT = `You are Vision Len, an AI assistant describing a camera scene to a visually impaired person.
 Respond ONLY with strict JSON matching this shape:
 {
@@ -42,48 +92,32 @@ export async function describeScene(
   imageDataUrl: string,
   language: "en" | "zh",
 ): Promise<SceneResult> {
-  const apiKey = process.env.OPENAI_API_KEY;
+  const provider = providerConfig();
 
-  if (!apiKey) {
+  if (!provider.configured) {
     return fallbackScene(language, "openai-not-configured");
   }
 
   try {
     const langLabel = language === "zh" ? "Mandarin Chinese" : "English";
-    const res = await fetch("https://api.openai.com/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        model: "gpt-4o",
-        response_format: { type: "json_object" },
-        messages: [
-          { role: "system", content: SYSTEM_PROMPT },
-          {
-            role: "user",
-            content: [
-              {
-                type: "text",
-                text: `Describe this scene in ${langLabel}. Respond in ${langLabel} for the "description" field.`,
-              },
-              { type: "image_url", image_url: { url: imageDataUrl } },
-            ],
-          },
-        ],
-        max_tokens: 500,
-      }),
-      signal: AbortSignal.timeout(15000),
+    const content = await chatCompletion({
+      model: provider.model,
+      response_format: { type: "json_object" },
+      messages: [
+        { role: "system", content: SYSTEM_PROMPT },
+        {
+          role: "user",
+          content: [
+            {
+              type: "text",
+              text: `Describe this scene in ${langLabel}. Respond in ${langLabel} for the "description" field.`,
+            },
+            { type: "image_url", image_url: { url: imageDataUrl } },
+          ],
+        },
+      ],
+      max_tokens: 500,
     });
-
-    if (!res.ok) {
-      throw new Error(`OpenAI API error: ${res.status}`);
-    }
-
-    const json = await res.json();
-    const content = json.choices?.[0]?.message?.content;
-    if (!content) throw new Error("Empty OpenAI response");
 
     const parsed = JSON.parse(content);
     return {
@@ -92,7 +126,7 @@ export async function describeScene(
       scene_tags: Array.isArray(parsed.scene_tags) ? parsed.scene_tags : [],
       confidence:
         typeof parsed.confidence === "number" ? parsed.confidence : 0.5,
-      source: "openai-gpt4o",
+      source: provider.source,
     };
   } catch (err) {
     console.error("[vision] describeScene failed:", err);
@@ -105,22 +139,17 @@ export async function answerQuestion(
   sceneDescription: string,
   language: "en" | "zh",
 ): Promise<{ answer: string; confidence: number; source: string }> {
-  const apiKey = process.env.OPENAI_API_KEY;
+  const provider = providerConfig();
 
-  if (!apiKey) {
+  if (!provider.configured) {
     return fallbackAnswer(language, "openai-not-configured");
   }
 
   try {
     const langLabel = language === "zh" ? "Mandarin Chinese" : "English";
-    const res = await fetch("https://api.openai.com/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        model: "gpt-4o",
+    const answer = (
+      await chatCompletion({
+        model: provider.model,
         messages: [
           {
             role: "system",
@@ -132,19 +161,10 @@ export async function answerQuestion(
           },
         ],
         max_tokens: 200,
-      }),
-      signal: AbortSignal.timeout(15000),
-    });
+      })
+    ).trim();
 
-    if (!res.ok) {
-      throw new Error(`OpenAI API error: ${res.status}`);
-    }
-
-    const json = await res.json();
-    const answer = json.choices?.[0]?.message?.content?.trim();
-    if (!answer) throw new Error("Empty OpenAI response");
-
-    return { answer, confidence: 0.85, source: "openai-gpt4o" };
+    return { answer, confidence: 0.85, source: provider.source };
   } catch (err) {
     console.error("[vision] answerQuestion failed:", err);
     return fallbackAnswer(language, "fallback-error");
