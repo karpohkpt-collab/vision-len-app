@@ -1,6 +1,18 @@
-# vibe-stack-supabase
+# Vision Len
 
-Next.js 15 + Supabase starter for shipping vibe-coded apps fast. Clone, provision, build.
+Vision Len is a mobile-first AI visual assistant for visually impaired users that describes scenes, flags hazards, answers questions about surroundings, and gives spoken walking directions — hands-free with voice wake word and multilingual output.
+
+See `/docs` for the full plan (PRD, architecture, data model, sprints). This is the working v1 app — no login wall, demo data seeded, every action persists to Supabase.
+
+## What's built (Sprints 1-4 — v1 functional milestone)
+
+- **Scene description engine** — camera capture → `/api/describe` (GPT-4o Vision) → `scene_sessions` row → spoken description
+- **Hazard flagging** — hazards sorted high→low, spoken before the description
+- **Follow-up Q&A** — `/api/qa` stores `qa_exchanges`, text or voice input
+- **Wake word** — "Hey Vision" hands-free capture, EN/中文 toggle persisted to `user_preferences`
+- **Stripe paid tier** — free tier capped at 10 scans/day (`usage_counters`), `/api/checkout` + `/api/webhooks/stripe` activate `subscriptions.plan = pro`
+
+If `OPENAI_API_KEY` or Stripe keys are missing from Vercel env, the app degrades gracefully per `docs/ARCHITECTURE.md`'s "Core Without AI" rule instead of breaking — add real keys to make those calls live.
 
 ## Stack
 
@@ -10,32 +22,19 @@ Next.js 15 + Supabase starter for shipping vibe-coded apps fast. Clone, provisio
 | Language | TypeScript strict |
 | Styles | Tailwind CSS v4 (CSS-first, no config file) |
 | Auth + DB | Supabase (`@supabase/ssr`) |
-| Package manager | Bun |
+| Package manager | npm |
 | Deploy | Vercel |
 
 ## Quick start
 
 ```bash
-bun install
-cp .env.example .env.local   # fill in your Supabase keys
-bun dev
+npm install
+vercel env pull .env.local   # pulls Supabase keys from the linked Vercel project
+npm run dev
 ```
 
-Open http://localhost:3000. Edit `app/page.tsx` to start building.
+Open http://localhost:3000.
 
-## Provisioning a new project
+## Deploying
 
-Use the `/new-vibe-project <name>` skill (see `claude-dotfiles` repo) which:
-1. Clones this template and renames it
-2. Creates a new GitHub repo and pushes
-3. Creates a Supabase project and injects URL + anon key
-4. Creates a Vercel project linked to the GitHub repo
-5. Triggers first deploy and returns the preview URL
-
-## Working with AI
-
-See [CLAUDE.md](CLAUDE.md) for conventions. This repo is pre-wired for gstack — start with `/office-hours`.
-
-## Switching to Neon
-
-If you need Postgres without Supabase (e.g. prefer Drizzle ORM + Clerk for auth), a `vibe-stack-neon` variant is planned. For now: fork this and swap `@supabase/ssr` for `drizzle-orm` + `@neondatabase/serverless`, add Clerk or NextAuth.
+Deploy by git — push to `main` and Vercel auto-deploys. Don't run `vercel deploy`/`vercel --prod` with local files, it desyncs git.
