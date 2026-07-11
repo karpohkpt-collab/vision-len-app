@@ -12,3 +12,4 @@ npm-debug.log*
 next-env.d.ts
 .env*
 .claude/settings.local.json
+.claude/scheduled_tasks.lock
