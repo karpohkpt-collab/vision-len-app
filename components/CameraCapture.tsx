@@ -1,17 +1,18 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
 
 const MAX_WIDTH = 640;
 const JPEG_QUALITY = 0.6;
 
-export default function CameraCapture({
-  onCapture,
-  disabled,
-}: {
-  onCapture: (imageDataUrl: string) => void;
-  disabled?: boolean;
-}) {
+export type CameraCaptureHandle = {
+  capture: () => void;
+};
+
+const CameraCapture = forwardRef<
+  CameraCaptureHandle,
+  { onCapture: (imageDataUrl: string) => void; disabled?: boolean }
+>(function CameraCapture({ onCapture, disabled }, ref) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -48,7 +49,7 @@ export default function CameraCapture({
 
   function capture() {
     const video = videoRef.current;
-    if (!video || !ready) return;
+    if (!video || !ready || disabled) return;
 
     const scale = Math.min(1, MAX_WIDTH / video.videoWidth);
     const canvas = document.createElement("canvas");
@@ -60,6 +61,8 @@ export default function CameraCapture({
     const dataUrl = canvas.toDataURL("image/jpeg", JPEG_QUALITY);
     onCapture(dataUrl);
   }
+
+  useImperativeHandle(ref, () => ({ capture }));
 
   if (error) {
     return (
@@ -96,4 +99,6 @@ export default function CameraCapture({
       </button>
     </div>
   );
-}
+});
+
+export default CameraCapture;
