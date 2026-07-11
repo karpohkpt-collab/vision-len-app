@@ -2,8 +2,9 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "vibe-stack-supabase",
-  description: "Next.js + Supabase starter",
+  title: "Vision Len",
+  description:
+    "Vision Len — a hands-free AI visual assistant for visually impaired users.",
 };
 
 export default function RootLayout({
