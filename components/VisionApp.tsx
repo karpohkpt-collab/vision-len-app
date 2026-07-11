@@ -6,6 +6,8 @@ import { getOrCreateAnonId } from "@/lib/anon";
 import { speakQueue } from "@/lib/tts";
 import { buildSpokenSequence } from "@/lib/hazardSpeech";
 import { loadPreference, savePreference } from "@/lib/preferences";
+import { getSubscriptionStatus } from "@/lib/subscription";
+import { getTodayUsageCount } from "@/lib/usage";
 import {
   isSpeechRecognitionSupported,
   startWakeWordListener,
@@ -15,8 +17,11 @@ import SceneCard, { type SceneSession } from "./SceneCard";
 import SessionHistoryList from "./SessionHistoryList";
 import QAThread from "./QAThread";
 import LanguageToggle from "./LanguageToggle";
+import UpgradeCTA from "./UpgradeCTA";
 
-type CardState = "empty" | "loading" | "error" | "ready";
+type CardState = "empty" | "loading" | "error" | "limit" | "ready";
+
+const FREE_DAILY_LIMIT = 10;
 
 export default function VisionApp({
   initialSessions,
@@ -34,6 +39,11 @@ export default function VisionApp({
   const [errorMessage, setErrorMessage] = useState<string | undefined>();
   const [language, setLanguage] = useState<"en" | "zh">("en");
   const [wakeWordEnabled, setWakeWordEnabled] = useState(false);
+  const [isPro, setIsPro] = useState(false);
+  const [usageCount, setUsageCount] = useState(0);
+  const [checkoutBanner, setCheckoutBanner] = useState<
+    "success" | "cancel" | null
+  >(null);
   const cameraRef = useRef<CameraCaptureHandle>(null);
 
   useEffect(() => {
@@ -45,7 +55,37 @@ export default function VisionApp({
         setWakeWordEnabled(pref.wake_word_enabled);
       }
     });
+    Promise.all([getSubscriptionStatus(id), getTodayUsageCount(id)]).then(
+      ([status, count]) => {
+        setIsPro(status.isPro);
+        setUsageCount(count);
+        if (!status.isPro && count >= FREE_DAILY_LIMIT) {
+          setCardState("limit");
+        }
+      },
+    );
+
+    const params = new URLSearchParams(window.location.search);
+    const checkout = params.get("checkout");
+    if (checkout === "success" || checkout === "cancel") {
+      setCheckoutBanner(checkout);
+      window.history.replaceState({}, "", window.location.pathname);
+      if (checkout === "success") {
+        // Webhook may take a moment to land — poll briefly for the updated status.
+        let attempts = 0;
+        const interval = setInterval(() => {
+          attempts += 1;
+          refreshProStatus(id);
+          if (attempts >= 5) clearInterval(interval);
+        }, 1500);
+      }
+    }
   }, []);
+
+  async function refreshProStatus(id: string) {
+    const status = await getSubscriptionStatus(id);
+    setIsPro(status.isPro);
+  }
 
   useEffect(() => {
     if (!wakeWordEnabled || !isSpeechRecognitionSupported()) return;
@@ -79,8 +119,8 @@ export default function VisionApp({
       const json = await res.json();
 
       if (res.status === 402) {
-        setCardState("error");
-        setErrorMessage("You've used your 10 free scans today.");
+        setCardState("limit");
+        setUsageCount(json.usageCount ?? FREE_DAILY_LIMIT);
         return;
       }
       if (!res.ok) {
@@ -92,6 +132,7 @@ export default function VisionApp({
       const session: SceneSession = json.session;
       setActive(session);
       setCardState("ready");
+      setUsageCount(json.usageCount ?? 0);
       speakQueue(
         buildSpokenSequence(session),
         session.language === "zh" ? "zh" : "en",
@@ -143,7 +184,27 @@ export default function VisionApp({
             </button>
           )}
         </div>
+        <p className="text-xs font-medium">
+          {isPro ? (
+            <span className="text-green-700">✓ Vision Pro active — unlimited scans</span>
+          ) : (
+            <span className="text-neutral-400">
+              {usageCount}/{FREE_DAILY_LIMIT} free scans used today
+            </span>
+          )}
+        </p>
       </header>
+
+      {checkoutBanner === "success" && (
+        <div className="rounded-xl bg-green-50 border border-green-300 text-green-800 text-center p-3 text-sm font-medium">
+          {isPro ? "Vision Pro active!" : "Payment received — activating Vision Pro…"}
+        </div>
+      )}
+      {checkoutBanner === "cancel" && (
+        <div className="rounded-xl bg-neutral-100 border border-neutral-300 text-neutral-600 text-center p-3 text-sm">
+          Upgrade cancelled — you&apos;re still on free tier.
+        </div>
+      )}
 
       <CameraCapture
         ref={cameraRef}
@@ -151,7 +212,11 @@ export default function VisionApp({
         disabled={cardState === "loading"}
       />
 
-      <SceneCard state={cardState} session={active} errorMessage={errorMessage} />
+      {cardState === "limit" ? (
+        <UpgradeCTA anonId={anonId} />
+      ) : (
+        <SceneCard state={cardState} session={active} errorMessage={errorMessage} />
+      )}
 
       {active && cardState === "ready" && anonId && (
         <QAThread
