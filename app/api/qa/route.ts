@@ -3,6 +3,9 @@ import { createClient } from "@/lib/supabase/server";
 import { answerQuestion } from "@/lib/ai/vision";
 import { logAudit, logTouchpoint } from "@/lib/db/actions";
 
+// AI inference can exceed Vercel's default function timeout.
+export const maxDuration = 60;
+
 export async function POST(request: Request) {
   try {
     const body = await request.json();

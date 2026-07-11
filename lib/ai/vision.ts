@@ -1,3 +1,10 @@
+import {
+  answerQuestionClaude,
+  claudeSource,
+  describeSceneClaude,
+  isClaudeConfigured,
+} from "./claude";
+
 export type Hazard = {
   type: string;
   detail: string;
@@ -92,6 +99,19 @@ export async function describeScene(
   imageDataUrl: string,
   language: "en" | "zh",
 ): Promise<SceneResult> {
+  // Claude (Anthropic API) is the preferred provider when configured —
+  // used in production on Vercel. OpenAI-compatible (incl. local Ollama)
+  // is the fallback provider for local dev.
+  if (isClaudeConfigured()) {
+    try {
+      const result = await describeSceneClaude(imageDataUrl, language);
+      return { ...result, source: claudeSource() };
+    } catch (err) {
+      console.error("[vision] describeSceneClaude failed:", err);
+      return fallbackScene(language, "fallback-error");
+    }
+  }
+
   const provider = providerConfig();
 
   if (!provider.configured) {
@@ -139,6 +159,20 @@ export async function answerQuestion(
   sceneDescription: string,
   language: "en" | "zh",
 ): Promise<{ answer: string; confidence: number; source: string }> {
+  if (isClaudeConfigured()) {
+    try {
+      const answer = await answerQuestionClaude(
+        question,
+        sceneDescription,
+        language,
+      );
+      return { answer, confidence: 0.9, source: claudeSource() };
+    } catch (err) {
+      console.error("[vision] answerQuestionClaude failed:", err);
+      return fallbackAnswer(language, "fallback-error");
+    }
+  }
+
   const provider = providerConfig();
 
   if (!provider.configured) {

@@ -10,6 +10,9 @@ import {
   logTouchpoint,
 } from "@/lib/db/actions";
 
+// Vision inference can exceed Vercel's default function timeout.
+export const maxDuration = 60;
+
 export async function POST(request: Request) {
   try {
     const body = await request.json();
