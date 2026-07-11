@@ -6,6 +6,7 @@ export type SceneSession = {
   id: string;
   image_url: string;
   description: string;
+  description_confidence?: number | null;
   hazards: Hazard[];
   language: string;
   created_at: string;

@@ -3,10 +3,12 @@
 import { useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { getOrCreateAnonId } from "@/lib/anon";
-import { speak } from "@/lib/tts";
+import { speakQueue } from "@/lib/tts";
+import { buildSpokenSequence } from "@/lib/hazardSpeech";
 import CameraCapture from "./CameraCapture";
 import SceneCard, { type SceneSession } from "./SceneCard";
 import SessionHistoryList from "./SessionHistoryList";
+import QAThread from "./QAThread";
 
 type CardState = "empty" | "loading" | "error" | "ready";
 
@@ -33,7 +35,9 @@ export default function VisionApp({
     const supabase = createClient();
     const { data } = await supabase
       .from("scene_sessions")
-      .select("id, image_url, description, hazards, language, created_at")
+      .select(
+        "id, image_url, description, description_confidence, hazards, language, created_at",
+      )
       .order("created_at", { ascending: false })
       .limit(20);
     if (data) setSessions(data as SceneSession[]);
@@ -64,7 +68,10 @@ export default function VisionApp({
       const session: SceneSession = json.session;
       setActive(session);
       setCardState("ready");
-      speak(session.description, session.language === "zh" ? "zh" : "en");
+      speakQueue(
+        buildSpokenSequence(session),
+        session.language === "zh" ? "zh" : "en",
+      );
       refreshSessions();
     } catch {
       setCardState("error");
@@ -87,6 +94,14 @@ export default function VisionApp({
       <CameraCapture onCapture={handleCapture} disabled={cardState === "loading"} />
 
       <SceneCard state={cardState} session={active} errorMessage={errorMessage} />
+
+      {active && cardState === "ready" && anonId && (
+        <QAThread
+          sessionId={active.id}
+          anonId={anonId}
+          language={active.language === "zh" ? "zh" : "en"}
+        />
+      )}
 
       <section>
         <h2 className="text-sm font-semibold text-neutral-600 mb-2">
